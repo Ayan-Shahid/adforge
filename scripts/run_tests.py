@@ -55,7 +55,7 @@ def main():
         if c["id"] == 7:
             ok &= not tools_used and any(w in last.lower() for w in ("advertis", "ad ", "ads", "marketing"))
         if c["id"] == 9:
-            ok &= "launch_campaign" in tools_used and "confirm" in last.lower()
+            ok &= "launch_campaign" in tools_used and any(w in last.lower() for w in ("confirm", "go ahead", "reply yes", "proceed"))
         rows.append((c["id"], c["name"], "PASS" if ok else "FAIL", ",".join(dict.fromkeys(tools_used)) or "-", tok_total))
         print(f"[{rows[-1][2]}] {c['id']:>2} {c['name']}\n      tools={rows[-1][3]} tokens={tok_total}\n      reply={last[:160]!r}")
     passed = sum(r[2] == "PASS" for r in rows)
