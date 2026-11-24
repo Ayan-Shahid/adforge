@@ -1,0 +1,9 @@
+name: keep-api-warm
+on:
+  schedule: [{cron: "*/10 * * * *"}]
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --max-time 90 "${{ vars.API_URL }}/health" || curl -fsS --max-time 90 "${{ vars.API_URL }}/health"

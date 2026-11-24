@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdForge Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/config.js"></script>
+</head>
+<body>
+<div class="container">
+  <nav class="nav">
+    <a class="logo" href="index.html"><i>A</i>AdForge <span class="muted" style="font-weight:500">Admin</span></a>
+    <div class="nav-links"><span class="muted small" id="updated"></span><button class="btn sm" id="reload">Refresh</button><button class="btn sm" id="logout">Sign out</button></div>
+  </nav>
+
+  <div id="dash" style="display:none">
+    <div class="grid g4" id="kpis"></div>
+    <div style="height:16px"></div>
+    <div class="grid g2">
+      <div class="card"><div class="label">Messages per day (14 days)</div><div class="bars" id="daily"></div><div style="height:22px"></div></div>
+      <div class="card"><div class="label">Tool usage</div><div id="tools"></div></div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="grid g2">
+      <div class="card"><div class="label">Users</div><div class="scroll"><table class="t" id="users"></table></div></div>
+      <div class="card"><div class="label">Campaigns (all users)</div><div class="scroll"><table class="t" id="camps"></table></div></div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="card"><div class="label">Recent conversations</div><div class="scroll"><table class="t" id="recent"></table></div></div>
+    <div style="height:16px"></div>
+    <div class="card" id="detail" style="display:none"></div>
+  </div>
+</div>
+
+<div class="modal" id="login" style="display:none">
+  <form class="card" id="loginForm">
+    <a class="logo"><i>A</i>AdForge Admin</a>
+    <p style="margin:14px 0 16px">Enter the admin token to view platform analytics.</p>
+    <input class="field" id="tok" type="password" placeholder="Admin token" required autocomplete="current-password">
+    <p class="small" id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <div style="height:12px"></div>
+    <button class="btn primary" style="width:100%;justify-content:center">Sign in</button>
+  </form>
+</div>
+
+<script>
+const API = window.ADFORGE_API;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (n) => Number(n || 0).toLocaleString();
+const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.round(s/60) + "m ago" : s < 86400 ? Math.round(s/3600) + "h ago" : Math.round(s/86400) + "d ago"; };
+let TOKEN = sessionStorage.getItem("adforge_admin");
+
+async function get(path){
+  const r = await fetch(API + path, { headers: { "X-Admin-Token": TOKEN } });
+  if (r.status === 401) throw new Error("auth");
+  return r.json();
+}
+
+async function load(){
+  let d;
+  try { d = await get("/admin/overview"); }
+  catch (e) { sessionStorage.removeItem("adforge_admin"); $("#err").textContent = e.message === "auth" ? "Wrong token." : "Can't reach the API."; $("#login").style.display = "grid"; return; }
+  $("#login").style.display = "none"; $("#dash").style.display = "block";
+  $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  const k = d.kpis;
+  const kp = [["Users", fmt(k.users)], ["Conversations", fmt(k.threads)], ["Messages", fmt(k.messages)], ["Campaigns", `${fmt(k.campaigns)} <small class="muted" style="font-size:13px">(${k.active_campaigns} live)</small>`],
+    ["Tokens in / out", `${fmt(k.tokens_in)} / ${fmt(k.tokens_out)}`], ["Est. model cost", "$" + k.est_cost_usd.toFixed(4)], ["Avg latency", (k.avg_latency_ms / 1000).toFixed(2) + "s"], ["Safety blocks / errors", `${fmt(k.blocked)} / ${fmt(k.errors)}`]];
+  $("#kpis").innerHTML = kp.map(([a, b]) => `<div class="card kpi"><div class="k">${a}</div><div class="v">${b}</div></div>`).join("");
+
+  const max = Math.max(1, ...d.daily.map(x => x.messages));
+  $("#daily").innerHTML = d.daily.length ? d.daily.map(x => `<div class="b" style="height:${(x.messages / max) * 100}%" title="${x.day}: ${x.messages} messages"><span>${x.day.slice(5)}</span></div>`).join("") : `<p class="muted">No traffic yet.</p>`;
+  const tmax = Math.max(1, ...d.tools.map(x => x.n));
+  $("#tools").innerHTML = d.tools.length ? d.tools.map(x => `<div class="hbar"><span class="n">${esc(x.name)}</span><span class="track"><span class="fill" style="display:block;width:${x.n / tmax * 100}%"></span></span><span>${x.n}</span></div>`).join("") : `<p class="muted">No tool calls yet.</p>`;
+
+  $("#users").innerHTML = `<tr><th>User</th><th>Msgs</th><th>Chats</th><th>Campaigns</th><th>Tokens</th><th>Last seen</th></tr>` +
+    d.users.map(u => `<tr class="click" data-u="${esc(u.user_id)}"><td>${esc(u.user_id)}</td><td>${u.messages}</td><td>${u.threads}</td><td>${u.campaigns}</td><td>${fmt(u.tokens)}</td><td>${ago(u.last_seen)}</td></tr>`).join("");
+  document.querySelectorAll("#users tr.click").forEach(tr => tr.onclick = () => user(tr.dataset.u));
+
+  $("#camps").innerHTML = `<tr><th>#</th><th>User</th><th>Name</th><th>Platform</th><th>Budget</th><th>Status</th><th>A/B</th></tr>` +
+    d.campaigns.map(c => `<tr><td>${c.id}</td><td>${esc(c.user_id)}</td><td>${esc(c.name)}</td><td>${esc(c.platform)}</td><td>$${c.daily_budget}/d</td><td><span class="status ${esc(c.status)}">${esc(c.status)}</span></td><td>${c.ab_result ? esc(c.ab_result.winner) : "—"}</td></tr>`).join("");
+
+  $("#recent").innerHTML = `<tr><th>When</th><th>User / thread</th><th>Message</th><th>Reply</th><th>Tools</th><th>Tokens</th><th>Latency</th></tr>` +
+    d.recent.map(r => `<tr><td>${ago(r.created_at)}</td><td>${esc(r.user_id)}<br><span class="muted small">${esc(r.thread_id)}</span></td>
+      <td class="trunc" title="${esc(r.message)}">${esc(r.message)}</td><td class="trunc" title="${esc(r.reply)}">${r.blocked ? '<span class="tag bad">blocked</span>' : ""}${r.error ? '<span class="tag bad">error</span>' : ""}${esc(r.reply)}</td>
+      <td>${(r.tool_calls || []).map(t => `<span class="tag">${esc(t.name)}</span>`).join("")}</td><td>${r.tokens_in}/${r.tokens_out}</td><td>${(r.latency_ms / 1000).toFixed(1)}s</td></tr>`).join("");
+}
+
+async function user(id){
+  const d = await get(`/admin/users/${encodeURIComponent(id)}`);
+  const el = $("#detail"); el.style.display = "block";
+  el.innerHTML = `<div class="label">User detail: ${esc(id)}</div>
+    <div class="grid g2"><div><b>Long-term memory</b><pre class="small" style="white-space:pre-wrap;background:var(--panel2);padding:12px;border-radius:10px">${esc(JSON.stringify(d.profile, null, 2))}</pre></div>
+    <div><b>Threads</b>${d.threads.map(t => `<div class="small" style="margin:6px 0">${esc(t.thread_id)} · ${t.turns} turns · <span class="muted">${esc(t.first_message)}</span></div>`).join("") || '<p class="muted">None</p>'}</div></div>`;
+  el.scrollIntoView({ behavior: "smooth" });
+}
+
+$("#loginForm").onsubmit = (e) => { e.preventDefault(); TOKEN = $("#tok").value; sessionStorage.setItem("adforge_admin", TOKEN); load(); };
+$("#reload").onclick = load;
+$("#logout").onclick = () => { sessionStorage.removeItem("adforge_admin"); location.reload(); };
+TOKEN ? load() : ($("#login").style.display = "grid");
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdForge Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="assets/config.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side-l">
+    <div class="top">
+      <a class="logo" href="index.html"><i>A</i>AdForge</a>
+      <button class="btn primary" id="newChat">+ New campaign chat</button>
+    </div>
+    <div class="threads" id="threads"></div>
+    <div class="me"><span id="who"></span><button class="btn sm" id="signout">Switch</button></div>
+  </aside>
+
+  <main class="main">
+    <div class="msgs" id="msgs"><div class="inner" id="inner"></div></div>
+    <div class="composer">
+      <div class="suggest" id="suggest">
+        <button>My brand is Bean There, a specialty coffee subscription for remote workers. Remember that.</button>
+        <button>Write 3 Google search ads for an A/B test</button>
+        <button>A got 12,000 impressions and 240 clicks, B got 11,800 impressions and 310 clicks. Who won?</button>
+        <button>Forecast $25/day on Meta for 30 days, $35 average order</button>
+      </div>
+      <form class="box" id="form">
+        <textarea id="input" rows="1" placeholder="Describe your product, ask for ads, or paste your campaign results…"></textarea>
+        <button class="btn primary" id="send" type="submit">Send</button>
+      </form>
+    </div>
+  </main>
+
+  <aside class="side-r">
+    <div class="label">Brand memory</div>
+    <div class="kv" id="profile"><div>—</div><div class="muted">Tell AdForge about your business.</div></div>
+    <div class="label" style="display:flex;justify-content:space-between">Campaigns <a href="#" id="refresh" class="muted small">refresh</a></div>
+    <div id="campaigns" class="muted small">No campaigns yet.</div>
+  </aside>
+</div>
+
+<div class="modal" id="login" style="display:none">
+  <form class="card" id="loginForm">
+    <a class="logo" href="index.html"><i>A</i>AdForge</a>
+    <p style="margin:14px 0 16px">Sign in to your workspace. Your campaigns and brand memory stay private to this account.</p>
+    <input class="field" id="loginId" placeholder="Email or workspace name" required autocomplete="username">
+    <div style="height:12px"></div>
+    <button class="btn primary" style="width:100%;justify-content:center">Continue</button>
+  </form>
+</div>
+
+<script>
+const API = window.ADFORGE_API;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const md = (s) => DOMPurify.sanitize(marked.parse(s || ""));
+let USER = localStorage.getItem("adforge_user");
+let THREAD = null;
+
+function slug(s){ return s.trim().toLowerCase().replace(/[^\w.@:+-]+/g, "-").slice(0, 100); }
+function newThreadId(){ return "t-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+function showLogin(){ $("#login").style.display = "grid"; $("#loginId").focus(); }
+$("#loginForm").onsubmit = (e) => { e.preventDefault(); USER = slug($("#loginId").value); if (!USER) return;
+  localStorage.setItem("adforge_user", USER); $("#login").style.display = "none"; boot(); };
+$("#signout").onclick = () => { localStorage.removeItem("adforge_user"); location.reload(); };
+
+function addMsg(role, html, chips){
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = `<div class="av">${role === "user" ? "You" : "A"}</div><div class="bubble"><div class="content">${html}</div>${chips || ""}</div>`;
+  $("#inner").appendChild(d);
+  $("#msgs").scrollTop = $("#msgs").scrollHeight;
+  return d;
+}
+function toolChips(calls){
+  if (!calls || !calls.length) return "";
+  return `<div class="chips">${calls.map(c => `<span class="chip tool" title="${esc(JSON.stringify(c.args))}">${esc(c.name)}</span>`).join("")}</div>`;
+}
+function emptyState(){
+  $("#inner").innerHTML = `<div class="empty"><h2>What are we advertising today?</h2><p>Tell me about your business, or pick a suggestion below. I'll remember your brand for next time.</p></div>`;
+  $("#suggest").style.display = "flex";
+}
+
+async function api(path, opts){
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+async function loadThreads(){
+  try {
+    const { threads } = await api(`/users/${encodeURIComponent(USER)}/threads`);
+    $("#threads").innerHTML = threads.length ? threads.map(t =>
+      `<div class="thread ${t.thread_id === THREAD ? "active" : ""}" data-id="${esc(t.thread_id)}" title="${esc(t.first_message)}">${esc(t.first_message)}</div>`).join("")
+      : `<div class="muted small" style="padding:10px">No chats yet.</div>`;
+    document.querySelectorAll(".thread").forEach(el => el.onclick = () => openThread(el.dataset.id));
+  } catch { $("#threads").innerHTML = `<div class="muted small" style="padding:10px">Can't reach the API.</div>`; }
+}
+
+async function openThread(id){
+  THREAD = id; $("#suggest").style.display = "none"; $("#inner").innerHTML = "";
+  const { messages } = await api(`/users/${encodeURIComponent(USER)}/threads/${encodeURIComponent(id)}`);
+  messages.forEach(m => { addMsg("user", esc(m.message)); addMsg("bot", md(m.reply), toolChips(m.tool_calls)); });
+  loadThreads();
+}
+
+async function loadSide(){
+  try {
+    const [{ profile }, { campaigns }] = await Promise.all([
+      api(`/users/${encodeURIComponent(USER)}/profile`), api(`/users/${encodeURIComponent(USER)}/campaigns`)]);
+    const keys = Object.keys(profile || {});
+    $("#profile").innerHTML = keys.length ? keys.map(k => `<div>${esc(k.replace(/_/g, " "))}</div><div>${esc(Array.isArray(profile[k]) ? profile[k].join(", ") : profile[k])}</div>`).join("")
+      : `<div>—</div><div class="muted">Tell AdForge about your business.</div>`;
+    $("#campaigns").innerHTML = campaigns.length ? campaigns.map(c => `
+      <div class="camp"><div class="t"><span>#${c.id} ${esc(c.name)}</span><span class="status ${esc(c.status)}">${esc(c.status)}</span></div>
+      <div class="muted small">${esc(c.platform)} · $${c.daily_budget}/day · ${c.variants.length} variant(s)${c.ab_result ? " · winner: " + esc(c.ab_result.winner) : ""}</div>
+      ${c.variants.slice(0, 3).map(v => `<div class="small" style="margin-top:6px"><b>${esc(v.label)}:</b> ${esc(v.headline)}</div>`).join("")}</div>`).join("")
+      : "No campaigns yet.";
+  } catch {}
+}
+$("#refresh").onclick = (e) => { e.preventDefault(); loadSide(); };
+
+async function send(text){
+  if (!text.trim()) return;
+  if (!THREAD) THREAD = newThreadId();
+  $("#suggest").style.display = "none";
+  if ($("#inner .empty")) $("#inner").innerHTML = "";
+  addMsg("user", esc(text));
+  const pending = addMsg("bot", `<div class="typing"><span></span><span></span><span></span></div>`);
+  $("#send").disabled = true;
+  try {
+    const r = await api("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: USER, thread_id: THREAD, message: text }) });
+    pending.querySelector(".bubble").innerHTML = `<div class="content">${md(r.reply)}</div>${toolChips(r.tool_calls)}
+      <div class="muted small" style="margin-top:4px">${r.tokens ? r.tokens.in + " in / " + r.tokens.out + " out tokens" : ""}</div>`;
+  } catch {
+    pending.querySelector(".content").innerHTML = "Couldn't reach AdForge. Check your connection and try again.";
+  }
+  $("#send").disabled = false;
+  $("#msgs").scrollTop = $("#msgs").scrollHeight;
+  loadThreads(); loadSide();
+}
+
+$("#form").onsubmit = (e) => { e.preventDefault(); const v = $("#input").value; $("#input").value = ""; send(v); };
+$("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#form").requestSubmit(); } });
+$("#input").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; });
+document.querySelectorAll("#suggest button").forEach(b => b.onclick = () => send(b.textContent));
+$("#newChat").onclick = () => { THREAD = null; emptyState(); loadThreads(); };
+
+function boot(){ $("#who").textContent = USER; emptyState(); loadThreads(); loadSide(); }
+USER ? boot() : showLogin();
+</script>
+</body>
+</html>
