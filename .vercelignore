@@ -1,0 +1,8 @@
+api
+scripts
+docs
+.env
+**/.env
+.github
+.idea
+.claude
