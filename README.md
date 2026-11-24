@@ -132,10 +132,10 @@ Our 10 test cases in [`tests.json`](tests.json), run against the **live Render d
 | Metric | Value |
 |---|---|
 | Pass rate | 10/10 |
-| Median latency (live) | 2.97 s |
-| p95 latency (live) | 5.97 s |
-| Tokens for the full run (13 requests) | ~101k in / ~3.9k out |
-| Cost for the full run | **≈ $0.012** (Haiku 5.5: $0.10 / $0.50 per MTok) |
+| Median latency (live) | 3.44 s |
+| p95 latency (live) | 5.27 s |
+| Tokens for the full run (13 requests) | ~95k in / ~3.8k out |
+| Cost for the full run | **≈ $0.011** (Haiku 5.5: $0.10 / $0.50 per MTok) |
 
 Cost controls: blocked requests never reach the model, thinking is disabled, history is windowed to 24 messages, and replies are capped at 1,400 tokens.
 
